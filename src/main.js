@@ -125,6 +125,88 @@ class Map {
   }
 }
 
+class BoidRule {
+  constructor(weight) {
+    this.weight = weight;
+  }
+
+  apply(target) {
+    const intermediateResult = this.applyImpl(target);
+    return vec2.scale(vec2.create(), intermediateResult, this.weight);
+  }
+
+  applyImpl(target) {
+    throw new Error(`Not implemented`);
+  }
+}
+
+class CenterOfMassRule extends BoidRule {
+  applyImpl(target) {
+    const centerOfMass = vec2.create();
+    let numOtherBoids = 0;
+    for (const otherBoid of target.otherBoids()) {
+      vec2.add(centerOfMass, centerOfMass, otherBoid.position);
+      numOtherBoids++;
+    }
+    vec2.scale(centerOfMass, centerOfMass, 1.0 / numOtherBoids);
+    const result = vec2.clone(centerOfMass);
+    vec2.sub(result, result, target.position);
+    return result;
+  }
+}
+
+class AvoidanceRule extends BoidRule {
+  constructor(weight, {distanceThreshold}) {
+    super(weight);
+    this.distanceThreshold = distanceThreshold;
+  }
+
+  applyImpl(target) {
+    const result = vec2.create();
+    for (const otherBoid of target.otherBoids()) {
+      if (vec2.sqrDist(target.position, otherBoid.position) < this.distanceThreshold) {
+        // c = c  - (b.position - b_j.position)
+        vec2.sub(result, result, target.position);
+        vec2.add(result, result, otherBoid.position);
+      }
+    }
+    return result;
+  }
+}
+
+class MatchVelocityRule extends BoidRule {
+  applyImpl(target) {
+    const result = vec2.create();
+    let numOtherBoids = 0;
+    for (const otherBoid of target.otherBoids()) {
+      vec2.add(result, result, otherBoid.velocity);
+      numOtherBoids++;
+    }
+    vec2.scale(result, result, 1.0 / numOtherBoids);
+    vec2.sub(result, result, target.velocity);
+    return result;
+  }
+}
+
+class AttractToPointRule extends BoidRule {
+  constructor(weight, {targetPoint}) {
+    super(weight);
+    this.targetPoint = targetPoint;
+  }
+
+  applyImpl(target) {
+    const result = vec2.clone(this.targetPoint);
+    vec2.sub(result, result, target.position);
+    return result;
+  }
+}
+
+const baseRules = [
+  new CenterOfMassRule(0.01),
+  new AvoidanceRule(1.0, {distanceThreshold: 10.0}),
+  new MatchVelocityRule(1.0 / 8.0),
+];
+
 class Boid {
   constructor(manager, position) {
     this.manager = manager;
@@ -149,39 +231,8 @@ class Boid {
     }
   }
 
-  centerOfMassRule() {
-    const centerOfMass = vec2.create();
-    for (const boid of this.otherBoids()) {
-      vec2.add(centerOfMass, centerOfMass, boid.position);
-    }
-    vec2.scale(centerOfMass, centerOfMass, 1.0 / (this.manager.boids.length - 1));
-    const vec = vec2.clone(centerOfMass);
-    vec2.sub(vec, vec, this.position);
-    vec2.scale(vec, vec, 1.0 / 100.0);
-    return vec;
-  }
-
-  avoidanceRule() {
-    const vec = vec2.create();
-    for (const boid of this.otherBoids()) {
-      if (vec2.sqrDist(this.position, boid.position) < 10.0) {
-        // c = c  - (b.position - b_j.position)
-        vec2.sub(vec, vec, this.position);
-        vec2.add(vec, vec, boid.position);
-      }
-    }
-    return vec;
-  }
 
   matchVelocityRule() {
-    const vec = vec2.create();
-    for (const boid of this.otherBoids()) {
-      vec2.add(vec, vec, boid.velocity);
-    }
-    vec2.scale(vec, vec, 1.0 / (this.manager.boids.length - 1));
-    vec2.sub(vec, vec, this.velocity);
-    vec2.scale(vec, vec, 1.0 / 8.0);
-    return vec;
   }
 
   attractToPointRule() {
@@ -197,10 +248,16 @@ class Boid {
 
   simulate() {
     const results = [];
-    results.push(this.centerOfMassRule());
-    results.push(this.avoidanceRule());
-    results.push(this.matchVelocityRule());
-    results.push(this.attractToPointRule());
+    for (const baseRule of baseRules) {
+      results.push(baseRule.apply(this));
+    }
+    const targetPoint = vec2.fromValues(
+      this.manager.map.width / 2,
+      this.manager.map.height / 2
+    );
+    results.push(
+      new AttractToPointRule(1.0 / 50.0, {targetPoint}).apply(this)
+    );
 
     results.forEach(result => {
       vec2.add(this.velocity, this.velocity, result);
@@ -231,7 +288,6 @@ class Boid {
       curRot += rotInc;
     }
     ctx.fill();
-    //ctx.fillRect(0, 0, 1, 1);
     ctx.restore();
   }
 }
