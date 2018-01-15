@@ -1,5 +1,6 @@
 import {vec2} from 'gl-matrix';
 import tinycolor from 'tinycolor2';
+import shortid from 'shortid';
 
 // Re-exports
 global.vec2 = vec2;
@@ -17,12 +18,13 @@ function resizeCanvas(callback) {
     callback && callback();
   }, 0);
 }
-resizeCanvas(() => { game.init(); });
+resizeCanvas(() => {game.init();});
 window.addEventListener('resize', e => {
   resizeCanvas();
 });
 
 // https://gamedev.stackexchange.com/questions/79049/generating-tile-map
+// http://www.vergenet.net/~conrad/boids/pseudocode.html
 
 function* pointsInScreen(width, height) {
   for (let y = 0; y < height; y++) {
@@ -123,11 +125,157 @@ class Map {
   }
 }
 
+class Boid {
+  constructor(manager, position) {
+    this.manager = manager;
+    if (typeof position === 'undefined') {
+      this.position = randomVecInArea(manager.getMapWidth(), manager.getMapHeight());
+    } else {
+      this.position = position;
+    }
+    this.velocity = vec2.fromValues(0, 0);
+    this.id = shortid.generate();
+  }
+
+  equals(otherBoid) {
+    return this.id === otherBoid.id;
+  }
+
+  *otherBoids() {
+    for (const boid of this.manager.boids) {
+      if (!boid.equals(this)) {
+        yield boid;
+      }
+    }
+  }
+
+  centerOfMassRule() {
+    const centerOfMass = vec2.create();
+    for (const boid of this.otherBoids()) {
+      vec2.add(centerOfMass, centerOfMass, boid.position);
+    }
+    vec2.scale(centerOfMass, centerOfMass, 1.0 / (this.manager.boids.length - 1));
+    const vec = vec2.clone(centerOfMass);
+    vec2.sub(vec, vec, this.position);
+    vec2.scale(vec, vec, 1.0 / 100.0);
+    return vec;
+  }
+
+  avoidanceRule() {
+    const vec = vec2.create();
+    for (const boid of this.otherBoids()) {
+      if (vec2.sqrDist(this.position, boid.position) < 10.0) {
+        // c = c  - (b.position - b_j.position)
+        vec2.sub(vec, vec, this.position);
+        vec2.add(vec, vec, boid.position);
+      }
+    }
+    return vec;
+  }
+
+  matchVelocityRule() {
+    const vec = vec2.create();
+    for (const boid of this.otherBoids()) {
+      vec2.add(vec, vec, boid.velocity);
+    }
+    vec2.scale(vec, vec, 1.0 / (this.manager.boids.length - 1));
+    vec2.sub(vec, vec, this.velocity);
+    vec2.scale(vec, vec, 1.0 / 8.0);
+    return vec;
+  }
+
+  attractToPointRule() {
+    const targetPoint = vec2.fromValues(
+      this.manager.map.width / 2,
+      this.manager.map.height / 2
+    );
+    const vec = vec2.clone(targetPoint);
+    vec2.sub(vec, vec, this.position);
+    vec2.scale(vec, vec, 1.0 / 50.0);
+    return vec;
+  }
+
+  simulate() {
+    const results = [];
+    results.push(this.centerOfMassRule());
+    results.push(this.avoidanceRule());
+    results.push(this.matchVelocityRule());
+    results.push(this.attractToPointRule());
+
+    results.forEach(result => {
+      vec2.add(this.velocity, this.velocity, result);
+    });
+
+    vec2.add(this.position, this.position, this.velocity);
+  }
+
+  draw(ctx) {
+    const x = Math.floor(this.position[0]);
+    const y = Math.floor(this.position[1]);
+    const triangleSize = 3.0;
+    const rotInc = (Math.PI * 2) / 3.0;
+    const rotation = Math.atan2(this.velocity[1], this.velocity[0]) - (rotInc / 2.0);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = '#f00';
+    ctx.beginPath();
+    let curRot = rotation - (rotInc / 2.0);
+    for (let i = 0; i < 4; i++) {
+      const drawX = Math.cos(curRot) * triangleSize;
+      const drawY = Math.sin(curRot) * triangleSize;
+      if (i === 0) {
+        ctx.moveTo(drawX, drawY);
+      } else {
+        ctx.lineTo(drawX, drawY);
+      }
+      curRot += rotInc;
+    }
+    ctx.fill();
+    //ctx.fillRect(0, 0, 1, 1);
+    ctx.restore();
+  }
+}
+
+class BoidManager {
+  constructor(map, numBoids) {
+    this.map = map;
+    this.boids = new Array(numBoids);
+    for (let i = 0; i < numBoids; i++) {
+      this.boids[i] = new Boid(this);
+    }
+  }
+
+  getMapWidth() { return this.map.width; }
+  getMapHeight() { return this.map.height; }
+
+  simulate() {
+    for (const boid of this.boids) {
+      boid.simulate();
+    }
+  }
+
+  draw(ctx) {
+    this.boids.forEach(boid => {
+      boid.draw(ctx);
+    });
+  }
+}
+
+function randomVecInArea(width, height) {
+  const vec = vec2.create();
+  vec2.random(vec, Math.random());
+  vec[0] = Math.abs(vec[0]);
+  vec[1] = Math.abs(vec[1]);
+  vec2.multiply(vec, vec, vec2.fromValues(width, height));
+  vec2.floor(vec, vec);
+  return vec;
+}
+
 class Game {
   render() {
     const ctx = canvas.getContext('2d');
     ctx.putImageData(this.imageData, 0, 0);
-
+    this.boidManager.draw(ctx);
     requestAnimationFrame(this.render.bind(this));
   }
 
@@ -139,14 +287,8 @@ class Game {
     this.centerPoints = [];
     const widthHeightVector = vec2.fromValues(width, height);
     for (let i = 0; i < numCenterPoints; i++) {
-      const point = vec2.create();
-      vec2.random(point, Math.random());
-      point[0] = Math.abs(point[0]);
-      point[1] = Math.abs(point[1]);
-      vec2.multiply(point, point, widthHeightVector);
-      vec2.floor(point, point);
       const centerPoint = new CenterPoint(
-        point,
+        randomVecInArea(width, height),
         Math.floor(Math.random() * 2)
       );
       this.centerPoints.push(centerPoint);
@@ -175,7 +317,14 @@ class Game {
 
     this.imageData = this.map.toImageData(ctx);
 
+    this.boidManager = new BoidManager(this.map, 20);
+
     this.render();
+    setInterval(this.simulate.bind(this), 100);
+  }
+
+  simulate() {
+    this.boidManager.simulate();
   }
 }
 

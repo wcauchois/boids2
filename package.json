@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "gl-matrix": "^2.4.0",
+    "shortid": "^2.2.8",
     "tinycolor2": "^1.4.1"
   }
 }
