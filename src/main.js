@@ -23,6 +23,7 @@ window.addEventListener('resize', e => {
   resizeCanvas();
 });
 
+// http://glmatrix.net/docs/module-vec2.html
 // https://gamedev.stackexchange.com/questions/79049/generating-tile-map
 // http://www.vergenet.net/~conrad/boids/pseudocode.html
 
