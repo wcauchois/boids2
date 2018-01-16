@@ -97,6 +97,14 @@ class Map {
     return this.array[y * this.width + x];
   }
 
+  screenToLocal(point) {
+    const unclamped = vec2.scale(vec2.create(), point, 1.0 / PIXEL_SIZE);
+    return vec2.fromValues(
+      Math.max(0, Math.min(unclamped[0], this.width)),
+      Math.max(0, Math.min(unclamped[1], this.height))
+    );
+  }
+
   liminalize() {
     let edgeFactors = new Array(this.width * this.height);
     for (const [x, y] of pointsInScreen(this.width, this.height)) {
@@ -201,11 +209,20 @@ class AttractToPointRule extends BoidRule {
   }
 }
 
+class SlowDownRule extends BoidRule {
+  applyImpl(target) {
+    const result = vec2.clone(target.velocity);
+    return vec2.negate(result, result);
+  }
+}
+
 const baseRules = [
   new CenterOfMassRule(0.01),
   new AvoidanceRule(1.0, {distanceThreshold: 10.0}),
   new MatchVelocityRule(1.0 / 8.0),
+  new SlowDownRule(0.10),
 ];
+const weightForAttractToPointRule = 1.0 / 50.0;
 
 class Boid {
   constructor(manager, position) {
@@ -231,32 +248,14 @@ class Boid {
     }
   }
 
-
-  matchVelocityRule() {
-  }
-
-  attractToPointRule() {
-    const targetPoint = vec2.fromValues(
-      this.manager.map.width / 2,
-      this.manager.map.height / 2
-    );
-    const vec = vec2.clone(targetPoint);
-    vec2.sub(vec, vec, this.position);
-    vec2.scale(vec, vec, 1.0 / 50.0);
-    return vec;
-  }
-
   simulate() {
     const results = [];
     for (const baseRule of baseRules) {
       results.push(baseRule.apply(this));
     }
-    const targetPoint = vec2.fromValues(
-      this.manager.map.width / 2,
-      this.manager.map.height / 2
-    );
+    const targetPoint = this.manager.map.screenToLocal(mousePosition);
     results.push(
-      new AttractToPointRule(1.0 / 50.0, {targetPoint}).apply(this)
+      new AttractToPointRule(weightForAttractToPointRule, {targetPoint}).apply(this)
     );
 
     results.forEach(result => {
@@ -332,6 +331,7 @@ class Game {
     const ctx = canvas.getContext('2d');
     ctx.putImageData(this.imageData, 0, 0);
     this.boidManager.draw(ctx);
+
     requestAnimationFrame(this.render.bind(this));
   }
 
@@ -376,13 +376,19 @@ class Game {
     this.boidManager = new BoidManager(this.map, 20);
 
     this.render();
-    setInterval(this.simulate.bind(this), 100);
+    setInterval(this.simulate.bind(this), 16);
   }
 
   simulate() {
     this.boidManager.simulate();
   }
 }
+
+const mousePosition = vec2.create();
+canvas.addEventListener('mousemove', e => {
+  vec2.set(mousePosition, e.clientX, e.clientY);
+});
+global.mousePosition = mousePosition;
 
 const game = new Game();
 global.game = game;
