@@ -216,6 +216,7 @@ class SlowDownRule extends BoidRule {
   }
 }
 
+const BOID_THINK_RATE = 6;
 const baseRules = [
   new CenterOfMassRule(0.01),
   new AvoidanceRule(1.0, {distanceThreshold: 10.0}),
@@ -249,20 +250,23 @@ class Boid {
   }
 
   simulate() {
-    const results = [];
-    for (const baseRule of baseRules) {
-      results.push(baseRule.apply(this));
+    if (frameCount % BOID_THINK_RATE === 0) {
+      const results = [];
+      for (const baseRule of baseRules) {
+        results.push(baseRule.apply(this));
+      }
+      const targetPoint = this.manager.map.screenToLocal(mousePosition);
+      results.push(
+        new AttractToPointRule(weightForAttractToPointRule, {targetPoint}).apply(this)
+      );
+
+      results.forEach(result => {
+        vec2.add(this.velocity, this.velocity, result);
+      });
     }
-    const targetPoint = this.manager.map.screenToLocal(mousePosition);
-    results.push(
-      new AttractToPointRule(weightForAttractToPointRule, {targetPoint}).apply(this)
-    );
 
-    results.forEach(result => {
-      vec2.add(this.velocity, this.velocity, result);
-    });
-
-    vec2.add(this.position, this.position, this.velocity);
+    const effectiveVelocity = vec2.scale(vec2.create(), this.velocity, 1.0 / BOID_THINK_RATE);
+    vec2.add(this.position, this.position, effectiveVelocity);
   }
 
   draw(ctx) {
@@ -381,6 +385,7 @@ class Game {
 
   simulate() {
     this.boidManager.simulate();
+    frameCount++;
   }
 }
 
@@ -389,6 +394,8 @@ canvas.addEventListener('mousemove', e => {
   vec2.set(mousePosition, e.clientX, e.clientY);
 });
 global.mousePosition = mousePosition;
+
+let frameCount = 0;
 
 const game = new Game();
 global.game = game;
